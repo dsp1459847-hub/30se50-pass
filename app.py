@@ -5,99 +5,91 @@ from collections import Counter
 import datetime
 import io
 
-# --- 1. हाई-एक्यूरेसी इंजन (Safe & Static Fix) ---
-def get_safe_high_accuracy_picks(df, s_name, target_date):
+# --- 1. v57 मास्टर इंजन (Full Day Isolation) ---
+def get_v57_fixed_logic(df, s_name, target_date):
     try:
-        # डेटा क्लीनिंग: खाली या गलत डेटा को हटाना
+        # डेटा क्लीनिंग
         df_clean = df.iloc[:, [1, df.columns.get_loc(s_name)]].copy()
         df_clean.columns = ['DATE', 'NUM']
         df_clean['DATE'] = pd.to_datetime(df_clean['DATE'], dayfirst=True, errors='coerce').dt.date
         df_clean['NUM'] = pd.to_numeric(df_clean['NUM'], errors='coerce')
-        
-        # 🛑 NaN (खाली सेल) को यहीं हटा दिया ताकि एरर न आए
         df_clean = df_clean.dropna(subset=['DATE', 'NUM'])
 
-        # 🛑 Static Vision: केवल चुनी गई तारीख से पहले का डेटा देखना
-        hist_data = df_clean[df_clean['DATE'] < target_date]
+        # 🛑 असली फिक्स: आज की तारीख का कोई भी डेटा इस्तेमाल नहीं होगा।
+        # सिर्फ कल (target_date - 1) तक का ही इतिहास देखा जाएगा।
+        # इससे सुबह का रिजल्ट डालने पर शाम की प्रेडिक्शन नहीं बदलेगी।
+        hist_limit = target_date - datetime.timedelta(days=1)
+        hist_data = df_clean[df_clean['DATE'] <= hist_limit]
         
         if len(hist_data) < 10:
             return "इतिहास कम है", "N/A", []
 
-        # A. साल दर साल (Yearly Connection)
-        t_day, t_month = target_date.day, target_date.month
-        yearly = hist_data[(hist_data['DATE'].apply(lambda x: x.day == t_day and x.month == t_month))]['NUM'].astype(int).tolist()
+        all_vals = hist_data['NUM'].astype(int).tolist()
+        last_val = all_vals[-1] # कल का आखिरी नंबर
 
-        # B. वार की ताकत (Day-wise Power)
+        # --- लॉजिक: वार + मिरर + जंप ---
         t_day_name = target_date.strftime('%A')
         day_hist = hist_data[hist_data['DATE'].apply(lambda x: x.strftime('%A')) == t_day_name]['NUM'].astype(int).tolist()
         top_3_day = [n for n, c in Counter(day_hist[-100:]).most_common(3)]
 
-        # C. कल की चाल (Last Valid Result)
-        last_val = int(hist_data.iloc[-1]['NUM'])
         mirror = (last_val + 50) % 100
         neighbors = [(last_val + 1) % 100, (last_val - 1) % 100]
 
-        # मास्टर पूल (8 नंबर)
-        combined_pool = list(set(yearly + top_3_day + [mirror] + neighbors))
-        final_picks_raw = combined_pool[:8]
-        top_picks_str = " | ".join([f"{n:02d}" for n in final_picks_raw])
+        # मास्टर पुल
+        combined_pool = list(set(top_3_day + [mirror] + neighbors))
+        final_picks = combined_pool[:10]
         
-        analysis = f"वार: {t_day_name} | पिछला: {last_val:02d} | मिरर: {mirror:02d}"
+        top_picks_str = " | ".join([f"{n:02d}" for n in sorted(final_picks)])
+        analysis = f"कल का अंतिम: {last_val:02d} | वार: {t_day_name}"
         
-        return analysis, top_picks_str, final_picks_raw
+        return analysis, top_picks_str, final_picks
 
     except Exception as e:
-        return f"विश्लेषण में त्रुटि", "N/A", []
+        return f"Error: {str(e)}", "N/A", []
 
 # --- 2. UI सेटअप ---
-st.set_page_config(page_title="MAYA AI v56 Fixed", layout="wide")
-st.title("🛡️ MAYA AI: v56 Deep-Clean (No More Errors)")
-st.info("💡 **Error Fixed:** अब खाली सेल होने पर भी 'NaN' एरर नहीं आएगा और प्रेडिक्शन फिक्स रहेगी।")
+st.set_page_config(page_title="MAYA AI v57 Full Lock", layout="wide")
+st.title("🛡️ MAYA AI: v57 Zero-Leakage Engine")
+st.info("💡 **FIXED:** अब आज का कोई भी रिजल्ट डालने पर आज की किसी भी शिफ्ट की प्रेडिक्शन नहीं बदलेगी।")
 
 uploaded_file = st.file_uploader("📂 अपनी Excel फ़ाइल अपलोड करें", type=['xlsx'])
 
 if uploaded_file:
     try:
-        # एक्सेल लोड करना (Error Handling के साथ)
         df = pd.read_excel(io.BytesIO(uploaded_file.getvalue()), engine='openpyxl')
-        
         df_match = df.copy()
-        # तारीख कॉलम की पहचान (Index 1)
         df_match['DATE_COL'] = pd.to_datetime(df_match.iloc[:, 1], dayfirst=True, errors='coerce').dt.date
         
-        shift_cols = [c for c in ['DS', 'FD', 'GD', 'GL', 'DB', 'SG', 'ZA'] if c in df.columns]
-        target_date = st.date_input("📅 विश्लेषण की तारीख चुनें:", datetime.date.today())
+        # शिफ्ट्स की लिस्ट
+        shift_cols = [c for c in ['DS', 'FD', 'GD', 'GL', 'DB', 'SG'] if c in df.columns]
+        target_date = st.date_input("📅 प्रेडिक्शन की तारीख चुनें:", datetime.date.today())
 
-        if st.button("🚀 सुरक्षित स्कैन शुरू करें"):
+        if st.button("🚀 100% फिक्स्ड स्कैन"):
             selected_row = df_match[df_match['DATE_COL'] == target_date]
             results = []
 
             for s in shift_cols:
-                info, picks_str, raw_picks = get_safe_high_accuracy_picks(df_match, s, target_date)
+                # यहाँ 'Day Isolation' लागू है
+                info, picks_str, raw_list = get_v57_fixed_logic(df_match, s, target_date)
                 
-                actual_val = "--"
+                actual = "--"
                 res_emoji = "⚪"
-                
                 if not selected_row.empty:
-                    # आज का असली रिजल्ट उठाना (NaN चेक के साथ)
                     val = selected_row[s].values[0]
                     if pd.notnull(val) and str(val).replace('.','',1).isdigit():
-                        val_int = int(float(val))
-                        actual_val = f"{val_int:02d}"
-                        res_emoji = "✅ PASS" if val_int in raw_picks else "❌"
+                        v_int = int(float(val))
+                        actual = f"{v_int:02d}"
+                        res_emoji = "✅ PASS" if v_int in raw_list else "❌"
 
                 results.append({
-                    "Shift": s,
-                    "📍 Result": actual_val,
-                    "परिणाम": res_emoji,
-                    "📊 विश्लेषण": info,
-                    "🌟 टॉप सिलेक्शन": picks_str
+                    "Shift": s, "Result": actual, "परिणाम": res_emoji, 
+                    "📊 विश्लेषण": info, "🌟 टॉप 10": picks_str
                 })
 
             st.table(pd.DataFrame(results))
-            st.warning("🔒 **Security Mode Active:** खाली सेल्स और भविष्य के डेटा को हटा दिया गया है। प्रेडिक्शन अब नहीं बदलेगी।")
+            st.warning("🔒 **Full Day Lock Active:** आज का डेटा सिर्फ 'Result' कॉलम में दिखेगा, प्रेडिक्शन में उसका कोई हाथ नहीं होगा।")
             st.balloons()
 
     except Exception as e:
-        st.error(f"Excel पढ़ने में समस्या: {e}")
+        st.error(f"Error: {e}")
                 
