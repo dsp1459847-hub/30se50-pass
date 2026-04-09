@@ -5,106 +5,99 @@ from collections import Counter
 import datetime
 import io
 
-# --- 1. हाई-एक्यूरेसी इंजन (30-50% Accuracy Booster) ---
-def get_pro_ensemble_picks(df, s_name, target_date):
+# --- 1. हाई-एक्यूरेसी इंजन (Safe & Static Fix) ---
+def get_safe_high_accuracy_picks(df, s_name, target_date):
     try:
-        # डेटा क्लीनिंग (B=Date, s_name=Shift)
+        # डेटा क्लीनिंग: खाली या गलत डेटा को हटाना
         df_clean = df.iloc[:, [1, df.columns.get_loc(s_name)]].copy()
         df_clean.columns = ['DATE', 'NUM']
-        df_clean['DATE'] = pd.to_datetime(df_clean['DATE'], errors='coerce').dt.date
+        df_clean['DATE'] = pd.to_datetime(df_clean['DATE'], dayfirst=True, errors='coerce').dt.date
         df_clean['NUM'] = pd.to_numeric(df_clean['NUM'], errors='coerce')
+        
+        # 🛑 NaN (खाली सेल) को यहीं हटा दिया ताकि एरर न आए
         df_clean = df_clean.dropna(subset=['DATE', 'NUM'])
 
-        if len(df_clean) < 50:
-            return "Data Kam", "N/A"
+        # 🛑 Static Vision: केवल चुनी गई तारीख से पहले का डेटा देखना
+        hist_data = df_clean[df_clean['DATE'] < target_date]
+        
+        if len(hist_data) < 10:
+            return "इतिहास कम है", "N/A", []
 
-        # A. साल दर साल (Yearly Legacy) - आज की तारीख का 5 साल का इतिहास
+        # A. साल दर साल (Yearly Connection)
         t_day, t_month = target_date.day, target_date.month
-        past_years = df_clean[(df_clean['DATE'].apply(lambda x: x.day == t_day and x.month == t_month))]
-        legacy_nums = [int(n) for n in past_years['NUM'].values]
+        yearly = hist_data[(hist_data['DATE'].apply(lambda x: x.day == t_day and x.month == t_month))]['NUM'].astype(int).tolist()
 
-        # B. वार की ताकत (Weekday Power) - पिछले 2 सालों में आज के वार का टॉप 5
+        # B. वार की ताकत (Day-wise Power)
         t_day_name = target_date.strftime('%A')
-        day_history = df_clean[df_clean['DATE'].apply(lambda x: x.strftime('%A')) == t_day_name]['NUM'].astype(int).tolist()
-        top_5_day = [n for n, c in Counter(day_history[-150:]).most_common(5)]
+        day_hist = hist_data[hist_data['DATE'].apply(lambda x: x.strftime('%A')) == t_day_name]['NUM'].astype(int).tolist()
+        top_3_day = [n for n, c in Counter(day_hist[-100:]).most_common(3)]
 
-        # C. ताज़ा रोटेशन (Yesterday's Pulse)
-        recent_data = df_clean[df_clean['DATE'] < target_date].tail(1)
-        if not recent_data.empty:
-            last_val = int(recent_data['NUM'].values[0])
-            mirror = (last_val + 50) % 100
-            neighbors = [(last_val + 1) % 100, (last_val - 1) % 100]
-        else:
-            last_val, mirror, neighbors = 0, 0, [0, 0]
+        # C. कल की चाल (Last Valid Result)
+        last_val = int(hist_data.iloc[-1]['NUM'])
+        mirror = (last_val + 50) % 100
+        neighbors = [(last_val + 1) % 100, (last_val - 1) % 100]
 
-        # D. महीने का राजा (Monthly King)
-        monthly_data = df_clean[df_clean['DATE'].apply(lambda x: x.month == t_month)]['NUM'].astype(int).tolist()
-        hot_month = [n for n, c in Counter(monthly_data[-300:]).most_common(2)]
-
-        # --- मास्टर पुल (Master Ensemble Pool) ---
-        # 10 नंबरों का सेट जो 30-50% पासिंग की संभावना रखता है
-        combined_pool = list(set(legacy_nums + top_5_day + [mirror] + neighbors + hot_month))
+        # मास्टर पूल (8 नंबर)
+        combined_pool = list(set(yearly + top_3_day + [mirror] + neighbors))
+        final_picks_raw = combined_pool[:8]
+        top_picks_str = " | ".join([f"{n:02d}" for n in final_picks_raw])
         
-        # टॉप 10 को सॉर्ट करके दिखाना
-        final_picks = sorted([f"{n:02d}" for n in combined_pool[:10]])
+        analysis = f"वार: {t_day_name} | पिछला: {last_val:02d} | मिरर: {mirror:02d}"
         
-        analysis = f"🎯 {t_day_name} HOT: {top_5_day[0]:02d} | 🪞 मिरर: {mirror:02d} | 🏛️ Legacy: {legacy_nums[0] if legacy_nums else '--'}"
-        
-        return analysis, " , ".join(final_picks)
+        return analysis, top_picks_str, final_picks_raw
 
-    except Exception:
-        return "Analyzing..", "N/A"
+    except Exception as e:
+        return f"विश्लेषण में त्रुटि", "N/A", []
 
 # --- 2. UI सेटअप ---
-st.set_page_config(page_title="MAYA AI 50% Success", layout="wide")
-st.title("🎯 MAYA AI: 30-50% Success Ensemble Booster")
-st.markdown("### 5 साल के डेटा का निचोड़ (Ensemble Logic)")
+st.set_page_config(page_title="MAYA AI v56 Fixed", layout="wide")
+st.title("🛡️ MAYA AI: v56 Deep-Clean (No More Errors)")
+st.info("💡 **Error Fixed:** अब खाली सेल होने पर भी 'NaN' एरर नहीं आएगा और प्रेडिक्शन फिक्स रहेगी।")
 
-uploaded_file = st.file_uploader("📂 अपनी Excel फ़ाइल अपलोड करें", type=['xlsx'], key="v22_pro")
+uploaded_file = st.file_uploader("📂 अपनी Excel फ़ाइल अपलोड करें", type=['xlsx'])
 
 if uploaded_file:
     try:
-        data_bytes = uploaded_file.getvalue()
-        df = pd.read_excel(io.BytesIO(data_bytes), engine='openpyxl')
+        # एक्सेल लोड करना (Error Handling के साथ)
+        df = pd.read_excel(io.BytesIO(uploaded_file.getvalue()), engine='openpyxl')
         
-        # तारीख कॉलम (Index 1) और शिफ्ट्स
         df_match = df.copy()
-        df_match['DATE_COL'] = pd.to_datetime(df_match.iloc[:, 1], errors='coerce').dt.date
+        # तारीख कॉलम की पहचान (Index 1)
+        df_match['DATE_COL'] = pd.to_datetime(df_match.iloc[:, 1], dayfirst=True, errors='coerce').dt.date
         
-        all_shifts = ['DS', 'FD', 'GD', 'GL', 'DB', 'SG', 'ZA']
-        shift_cols = [c for c in all_shifts if c in df.columns]
-
+        shift_cols = [c for c in ['DS', 'FD', 'GD', 'GL', 'DB', 'SG', 'ZA'] if c in df.columns]
         target_date = st.date_input("📅 विश्लेषण की तारीख चुनें:", datetime.date.today())
 
-        if st.button("🚀 50% एक्यूरेसी स्कैन शुरू करें"):
+        if st.button("🚀 सुरक्षित स्कैन शुरू करें"):
             selected_row = df_match[df_match['DATE_COL'] == target_date]
-            results_list = []
+            results = []
 
             for s in shift_cols:
-                logic_info, top_picks = get_pro_ensemble_picks(df_match, s, target_date)
+                info, picks_str, raw_picks = get_safe_high_accuracy_picks(df_match, s, target_date)
                 
-                # SAME DAY RESULT
                 actual_val = "--"
+                res_emoji = "⚪"
+                
                 if not selected_row.empty:
-                    raw_v = str(selected_row[s].values[0]).strip()
-                    if raw_v.replace('.','',1).isdigit():
-                        actual_val = f"{int(float(raw_v)):02d}"
-                    else:
-                        actual_val = raw_v
+                    # आज का असली रिजल्ट उठाना (NaN चेक के साथ)
+                    val = selected_row[s].values[0]
+                    if pd.notnull(val) and str(val).replace('.','',1).isdigit():
+                        val_int = int(float(val))
+                        actual_val = f"{val_int:02d}"
+                        res_emoji = "✅ PASS" if val_int in raw_picks else "❌"
 
-                results_list.append({
+                results.append({
                     "Shift": s,
-                    "📍 SAME DAY": actual_val,
-                    "📊 मास्टर लॉजिक": logic_info,
-                    "🌟 टॉप 10 मास्टर सेट (30-50% Pass)": top_picks
+                    "📍 Result": actual_val,
+                    "परिणाम": res_emoji,
+                    "📊 विश्लेषण": info,
+                    "🌟 टॉप सिलेक्शन": picks_str
                 })
 
-            st.table(pd.DataFrame(results_list))
-            st.info("💡 **सफलता का सूत्र:** यह कोड हर शिफ्ट के लिए 10 नंबरों का 'पूल' देता है। अगर आप 6 शिफ्ट का कुल डेटा देखें, तो इतिहास के हिसाब से इनमें से 2-3 शिफ्ट में नंबर पास होना लगभग तय है (30% से 50% डेली एवरेज)।")
+            st.table(pd.DataFrame(results))
+            st.warning("🔒 **Security Mode Active:** खाली सेल्स और भविष्य के डेटा को हटा दिया गया है। प्रेडिक्शन अब नहीं बदलेगी।")
             st.balloons()
 
     except Exception as e:
-        st.error(f"Error: {e}")
-else:
-    st.info("एक्सेल फ़ाइल अपलोड करें।")
-      
+        st.error(f"Excel पढ़ने में समस्या: {e}")
+                
