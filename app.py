@@ -4,93 +4,99 @@ from io import BytesIO
 
 st.set_page_config(page_title="MAYA AI - Pro Data Splitter", layout="wide")
 
-st.title("📊 MAYA AI: Ikai-Dahai Shift Automator")
+st.title("📊 MAYA AI: Smart Shift Automator")
 
-# 1. File Upload Section
 uploaded_file = st.file_uploader("Apni Excel file upload karein", type=["xlsx"])
 
 if uploaded_file:
     # Data load karna
     df = pd.read_excel(uploaded_file)
     
-    # Date column ko datetime mein convert karna
-    df['Date'] = pd.to_datetime(df['Date'])
+    # Columns ke naam se faltu spaces hatana
+    df.columns = [str(c).strip() for c in df.columns]
     
-    st.sidebar.header("Settings")
-    
-    # 2. Date Filter Option
-    min_date = df['Date'].min()
-    max_date = df['Date'].max()
-    selected_dates = st.sidebar.date_input("Date Range Chunein", [min_date, max_date])
-    
-    # 3. Shift Selection Option
-    # C1 se aage ki shifts ko identify karna
-    all_columns = df.columns.tolist()
-    shift_columns = all_columns[2:] # Serial No aur Date ko chhod kar
-    base_shift = st.sidebar.selectbox("Apni Base (Pehli) Shift chunein", shift_columns)
-    
-    if len(selected_dates) == 2:
-        # Data Filter karna
-        mask = (df['Date'] >= pd.Timestamp(selected_dates[0])) & (df['Date'] <= pd.Timestamp(selected_dates[1]))
-        filtered_df = df.loc[mask].copy()
-        
-        st.write(f"Processing data from {selected_dates[0]} to {selected_dates[1]}")
-
-        # Processing Logic Function
-        def process_logic(data, base_col, other_cols):
-            sheet1_data = [] # Dahai Base
-            sheet2_data = [] # Ikai Base
+    # 1. Date Column ko handle karna (Flexible Search)
+    date_col = None
+    for col in df.columns:
+        if 'date' in col.lower():
+            date_col = col
+            break
             
-            for _, row in data.iterrows():
-                # Base number split
-                base_val = str(row[base_col]).zfill(2)
-                b_d, b_i = base_val[0], base_val[1]
-                
-                row_s1 = {"Date": row['Date'], "Base_Val": base_val}
-                row_s2 = {"Date": row['Date'], "Base_Val": base_val}
-                
-                for col in other_cols:
-                    other_val = str(row[col]).zfill(2)
-                    o_d, o_i = other_val[0], other_val[1]
-                    
-                    # Sheet 1: Base Dahai + Others (Dahai & Ikai)
-                    row_s1[f"{col}_Comb1"] = f"{b_d}{o_d}"
-                    row_s1[f"{col}_Comb2"] = f"{b_d}{o_i}"
-                    
-                    # Sheet 2: Base Ikai + Others (Ikai & Dahai)
-                    row_s2[f"{col}_Comb1"] = f"{b_i}{o_i}"
-                    row_s2[f"{col}_Comb2"] = f"{b_i}{o_d}"
-                
-                sheet1_data.append(row_s1)
-                sheet1_data.append(row_s2)
-            
-            return pd.DataFrame(sheet1_data), pd.DataFrame(sheet2_data)
-
-        other_shifts = [c for c in shift_columns if c != base_shift]
-        df_s1, df_s2 = process_logic(filtered_df, base_shift, other_shifts)
-
-        # 4. Results Display & Download
-        st.subheader("Generated Sheets Preview")
-        tab1, tab2 = st.tabs(["Sheet 1 (Dahai Base)", "Sheet 2 (Ikai Base)"])
+    if date_col:
+        df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
         
-        with tab1:
-            st.dataframe(df_s1)
-        with tab2:
-            st.dataframe(df_s2)
+        # 2. Shift Columns ko identify karna
+        # Serial No aur Date ko nikaal kar baaki sab Shifts hain
+        ignore_cols = ['Serial No', 'S.No', 'S.no', 'Sl No', 'Sno', date_col]
+        shift_columns = [c for c in df.columns if c not in ignore_cols]
+        
+        st.sidebar.header("Calculation Settings")
+        
+        if not shift_columns:
+            st.error("Shifts ke columns nahi mile. Kripya Excel format check karein.")
+        else:
+            # Dropdown mein shifts ke asli naam dikhenge (e.g., DS, FD, GD)
+            base_shift = st.sidebar.selectbox("Pehli (Base) Shift chunein", shift_columns)
+            
+            # Date Range Filter
+            min_date = df[date_col].min()
+            max_date = df[date_col].max()
+            selected_dates = st.sidebar.date_input("Kab se kab tak ka data?", [min_date, max_date])
 
-        # Excel Download Button
-        def to_excel(df1, df2):
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df1.to_excel(writer, sheet_name='Dahai_Base', index=False)
-                df2.to_excel(writer, sheet_name='Ikai_Base', index=False)
-            return output.getvalue()
+            if len(selected_dates) == 2:
+                mask = (df[date_col] >= pd.Timestamp(selected_dates[0])) & (df[date_col] <= pd.Timestamp(selected_dates[1]))
+                filtered_df = df.loc[mask].copy()
 
-        excel_data = to_excel(df_s1, df_s2)
-        st.download_button(label="📥 Download Processed Excel", 
-                           data=excel_data, 
-                           file_name="MAYA_AI_Processed.xlsx")
+                def process_logic(data, b_col, other_cols):
+                    s1_rows, s2_rows = [], []
+                    for _, row in data.iterrows():
+                        # Base Number logic
+                        b_val = str(row[b_col]).split('.')[0].zfill(2) if pd.notnull(row[b_col]) else "00"
+                        # Handle case where val might be single digit or empty
+                        if len(b_val) < 2: b_val = b_val.zfill(2)
+                        b_d, b_i = b_val[-2], b_val[-1]
+                        
+                        # Data entries
+                        r1 = {date_col: row[date_col], "Base_Shift": b_col, "Base_Value": b_val}
+                        r2 = {date_col: row[date_col], "Base_Shift": b_col, "Base_Value": b_val}
+                        
+                        for col in other_cols:
+                            o_val = str(row[col]).split('.')[0].zfill(2) if pd.notnull(row[col]) else "00"
+                            if len(o_val) < 2: o_val = o_val.zfill(2)
+                            o_d, o_i = o_val[-2], o_val[-1]
+                            
+                            # Sheet 1: Dahai Base + (Other Dahai & Other Ikai)
+                            r1[f"{col}_Comb1"] = f"{b_d}{o_d}"
+                            r1[f"{col}_Comb2"] = f"{b_d}{o_i}"
+                            
+                            # Sheet 2: Ikai Base + (Other Ikai & Other Dahai)
+                            r2[f"{col}_Comb1"] = f"{b_i}{o_i}"
+                            r2[f"{col}_Comb2"] = f"{b_i}{o_d}"
+                            
+                        s1_rows.append(r1)
+                        s2_rows.append(r2)
+                    return pd.DataFrame(s1_rows), pd.DataFrame(s2_rows)
 
+                other_shifts = [c for c in shift_columns if c != base_shift]
+                df_s1, df_s2 = process_logic(filtered_df, base_shift, other_shifts)
+
+                # Results Display
+                st.subheader(f"✅ Processed: Base Shift '{base_shift}' ke hisaab se")
+                t1, t2 = st.tabs(["Sheet 1 (Dahai Base)", "Sheet 2 (Ikai Base)"])
+                with t1: st.dataframe(df_s1)
+                with t2: st.dataframe(df_s2)
+
+                # Excel Download
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                    df_s1.to_excel(writer, sheet_name='Dahai_Base', index=False)
+                    df_s2.to_excel(writer, sheet_name='Ikai_Base', index=False)
+                
+                st.download_button(label="📥 Download Result Excel", 
+                                   data=output.getvalue(), 
+                                   file_name=f"MAYA_Analysis_{base_shift}.xlsx")
+    else:
+        st.error("Excel mein 'Date' naam ka column nahi mila. Kripya check karein.")
 else:
-    st.info("Kripya Excel file upload karein jisme 'Serial No', 'Date' aur Shifts ke columns hon.")
+    st.info("Kripya Excel file upload karein. Pehle do columns 'S.No' aur 'Date' hone chahiye, uske baad Shifts.")
     
