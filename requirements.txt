@@ -3,4 +3,4 @@ pandas
 numpy
 openpyxl
 scikit-learn
-aur xlsxwriter
+xlsxwriter
