@@ -1,107 +1,83 @@
 import streamlit as st
 import pandas as pd
 from io import BytesIO
-from datetime import date
 
-st.set_page_config(page_title="MAYA AI - Advanced Dashboard", layout="wide")
-st.title("📊 MAYA AI: Dual Date & All-Shift Logic")
+st.set_page_config(page_title="MAYA AI - Formula HD", layout="wide")
+st.title("📊 MAYA AI: Excel Formula Generator (HD Layout)")
 
 uploaded_file = st.file_uploader("Apni Excel file upload karein", type=["xlsx"])
 
 if uploaded_file:
+    # 1. Sabhi sheets read karna
     all_sheets = pd.read_excel(uploaded_file, sheet_name=None)
-    first_sheet_name = list(all_sheets.keys())[0]
-    df = all_sheets[first_sheet_name].copy()
+    first_sheet = list(all_sheets.keys())[0]
+    df = all_sheets[first_sheet].copy()
     df.columns = [str(c).strip() for c in df.columns]
     
-    date_col = next((c for c in df.columns if 'date' in c.lower()), None)
+    # Date column pehchanna
+    date_col = next((c for c in df.columns if 'date' in c.lower()), df.columns[1])
     
-    if date_col:
-        df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+    # 2. Excel Writer with Formulas
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        # Original Data save karein
+        df.to_excel(writer, sheet_name='Original_Data', index=False)
+        workbook = writer.book
         
-        # Shift identification (S.No etc. ko ignore karke)
-        ignore = ['s. number', 's.no', 'serial', 'sno', 'unnamed', date_col.lower()]
-        shift_columns = [c for c in df.columns if not any(k in c.lower() for k in ignore) and not str(c).startswith('ï')]
-
-        # --- Control Panel (Alag-Alag Dates) ---
-        st.subheader("🛠️ Control Panel")
-        col1, col2, col3 = st.columns(3)
+        # --- HD Design Styles ---
+        header_fmt = workbook.add_format({'bold': True, 'bg_color': '#1F4E78', 'font_color': 'white', 'border': 1, 'align': 'center'})
+        data_fmt = workbook.add_format({'border': 1, 'align': 'center'})
+        dash_fmt = workbook.add_format({'bold': True, 'bg_color': '#FFC000', 'border': 2, 'align': 'center'})
         
-        with col1:
-            base_shift = st.selectbox("🎯 Base Shift Chunein:", shift_columns)
+        # --- 1. DASHBOARD SHEET ---
+        dash = workbook.add_worksheet('Dashboard')
+        dash.set_column('A:B', 25)
+        dash.write('A1', '⚙️ SELECT BASE SHIFT:', dash_fmt)
+        dash.write('B1', 'DS')  # Default Value
+        dash.write('A2', '📅 SELECT BASE DATE:', dash_fmt)
+        dash.write('B2', str(df[date_col].iloc[0])) # Default First Date
         
-        with col2:
-            st.write("📅 **Base Shift ki Date:**")
-            b_min, b_max = df[date_col].min().date(), df[date_col].max().date()
-            base_date_range = st.date_input("Base Date Selection", [b_min, b_max], key="base_date")
+        # Base Calculation Formulas (Hidden or Summary)
+        dash.write('A4', '✅ Base Number:', header_fmt)
+        dash.write_formula('B4', '=TEXT(INDEX(Original_Data!$C$2:$O$6000, MATCH(B2, Original_Data!$B$2:$B$6000, 0), MATCH(B1, Original_Data!$C$1:$I$1, 0)), "00")')
+        dash.write('A5', '🔢 Dahai (Base T):', header_fmt)
+        dash.write_formula('B5', '=LEFT(B4, 1)')
+        dash.write('A6', '🔢 Ikai (Base U):', header_fmt)
+        dash.write_formula('B6', '=RIGHT(B4, 1)')
 
-        with col3:
-            st.write("📅 **Baaki Shifts ki Date:**")
-            o_min, o_max = df[date_col].min().date(), df[date_col].max().date()
-            other_date_range = st.date_input("Other Date Selection", [o_min, o_max], key="other_date")
-
-        if len(base_date_range) == 2 and len(other_date_range) == 2:
-            # Base Shift ka data filter
-            base_mask = (df[date_col].dt.date >= base_date_range[0]) & (df[date_col].dt.date <= base_date_range[1])
-            df_base = df.loc[base_mask].copy()
-
-            # Other Shifts ka data filter
-            other_mask = (df[date_col].dt.date >= other_date_range[0]) & (df[date_col].dt.date <= other_date_range[1])
-            df_others = df.loc[other_mask].copy()
-
-            def process_pro_logic(df_b, df_o, b_col, all_cols):
-                s1_rows, s2_rows = [], []
-                # Dono dataframes ka size alag ho sakta hai, isliye minimum size tak loop chalega
-                min_len = min(len(df_b), len(df_o))
-                
-                for i in range(min_len):
-                    row_b = df_b.iloc[i]
-                    row_o = df_o.iloc[i]
-                    
-                    if pd.isna(row_b[b_col]): continue
-                    
-                    b_val = str(row_b[b_col]).split('.')[0].zfill(2)
-                    b_d, b_i = b_val[-2], b_val[-1]
-                    
-                    # Entry Header
-                    r1 = {"Base_Date": row_b[date_col].strftime('%d-%m-%Y'), "Base_Val": b_val}
-                    r2 = {"Base_Date": row_b[date_col].strftime('%d-%m-%Y'), "Base_Val": b_val}
-                    
-                    for col in all_cols: # Yahan Base Shift bhi included hai
-                        if pd.isna(row_o[col]):
-                            r1[f"{col}_C1"], r1[f"{col}_C2"] = "", ""
-                            r2[f"{col}_C1"], r2[f"{col}_C2"] = "", ""
-                        else:
-                            o_val = str(row_o[col]).split('.')[0].zfill(2)
-                            o_d, o_i = o_val[-2], o_val[-1]
-                            # Logic 1: Dahai Base + (Other Dahai & Other Ikai)
-                            r1[f"{col}_C1"], r1[f"{col}_C2"] = f"{b_d}{o_d}", f"{b_d}{o_i}"
-                            # Logic 2: Ikai Base + (Other Ikai & Other Dahai)
-                            r2[f"{col}_C1"], r2[f"{col}_C2"] = f"{b_i}{o_i}", f"{b_i}{o_d}"
-                    
-                    s1_rows.append(r1); s2_rows.append(r2)
-                return pd.DataFrame(s1_rows), pd.DataFrame(s2_rows)
-
-            # Ab 'other_shifts' mein Base Shift ko bhi rakha gaya hai
-            df_s1, df_s2 = process_pro_logic(df_base, df_others, base_shift, shift_columns)
-
-            st.divider()
-            st.success(f"Result Taiyaar Hai! Base: {base_shift}")
-            t1, t2 = st.tabs(["📑 Sheet 1 (Dahai Base)", "📑 Sheet 2 (Ikai Base)"])
-            with t1: st.dataframe(df_s1)
-            with t2: st.dataframe(df_s2)
-
-            # Excel save logic
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                for sheet_name, sheet_df in all_sheets.items():
-                    sheet_df.to_excel(writer, sheet_name=sheet_name, index=False)
-                df_s1.to_excel(writer, sheet_name=f'DAHAI_{base_shift}', index=False)
-                df_s2.to_excel(writer, sheet_name=f'IKAI_{base_shift}', index=False)
+        # --- 2. LOGIC SHEETS (Dahai & Ikai) ---
+        shifts = [c for c in df.columns if c not in ['S.No', 'S.no', 'S. NUMBER', 'Serial No', date_col]]
+        
+        for sheet_name in ['Dahai_Logic', 'Ikai_Logic']:
+            ws = workbook.add_worksheet(sheet_name)
+            ws.set_column('A:O', 15)
+            ws.write(0, 0, 'Date', header_fmt)
             
-            st.download_button("📥 Final Excel Download Karein", output.getvalue(), f"MAYA_DualDate_{base_shift}.xlsx")
-    else:
-        st.error("Date column nahi mila!")
+            for i, shift in enumerate(shifts):
+                col_pos = 1 + (i * 2)
+                ws.write(0, col_pos, f'{shift}_Comb1', header_fmt)
+                ws.write(0, col_pos + 1, f'{shift}_Comb2', header_fmt)
+                
+                # Formula implementation for 6000 rows
+                for row in range(1, 6001):
+                    # Date Link
+                    ws.write_formula(row, 0, f'=IF(Original_Data!B{row+1}="","",Original_Data!B{row+1})')
+                    
+                    # Original Data Column (C=67, D=68...)
+                    col_letter = chr(67 + i)
+                    base_cell = '$B$5' if sheet_name == 'Dahai_Logic' else '$B$6'
+                    
+                    if sheet_name == 'Dahai_Logic':
+                        # Dahai Logic: Base-D + Other-D | Base-D + Other-I
+                        ws.write_formula(row, col_pos, f'=IF(Original_Data!{col_letter}{row+1}="","",$Dashboard!{base_cell} & LEFT(TEXT(Original_Data!{col_letter}{row+1},"00"),1))')
+                        ws.write_formula(row, col_pos + 1, f'=IF(Original_Data!{col_letter}{row+1}="","",$Dashboard!{base_cell} & RIGHT(TEXT(Original_Data!{col_letter}{row+1},"00"),1))')
+                    else:
+                        # Ikai Logic: Base-I + Other-I | Base-I + Other-D
+                        ws.write_formula(row, col_pos, f'=IF(Original_Data!{col_letter}{row+1}="","",$Dashboard!{base_cell} & RIGHT(TEXT(Original_Data!{col_letter}{row+1},"00"),1))')
+                        ws.write_formula(row, col_pos + 1, f'=IF(Original_Data!{col_letter}{row+1}="","",$Dashboard!{base_cell} & LEFT(TEXT(Original_Data!{col_letter}{row+1},"00"),1))')
+
+    st.success("✅ HD Formula Sheet Taiyaar Hai!")
+    st.download_button("📥 Download Formula-Linked HD Excel", output.getvalue(), "MAYA_HD_Automated.xlsx")
 else:
-    st.info("Kripya Excel file upload karein.")
+    st.info("Kripya apni Excel file upload karein jisme S.No, Date aur Shifts hon.")
     
