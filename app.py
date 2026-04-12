@@ -1,69 +1,83 @@
+import streamlit as st
 import pandas as pd
+from io import BytesIO
 
-# 1. Aapki file ka naam yahan likhein
-input_file = '0DSP0.xlsx' 
-output_file = 'MAYA_AI_Automated_Formulas.xlsx'
+st.title("MAYA AI: Professional Formula File Generator")
 
-# 2. Data load karein
-try:
-    df = pd.read_excel(input_file)
-except:
-    # Agar Excel nahi milti toh sample data banayega testing ke liye
-    df = pd.DataFrame({'S.No': [1], 'Date': ['10-04-2026'], 'DS':[70], 'FD':[72], 'GD':[71], 'GL':[75], 'DB':[70], 'SG':[70], 'ZA':[70]})
+# 1. File Upload
+uploaded_file = st.file_uploader("Apni Original Excel file (0DSP0.xlsx) upload karein", type=["xlsx"])
 
-# 3. Excel Writer setup (with XlsxWriter engine)
-writer = pd.ExcelWriter(output_file, engine='xlsxwriter')
-df.to_excel(writer, sheet_name='Original_Data', index=False)
-workbook = writer.book
-
-# Formatting (Headers ke liye)
-header_fmt = workbook.add_format({'bold': True, 'bg_color': '#D7E4BC', 'border': 1})
-
-# --- DASHBOARD SHEET ---
-dash = workbook.add_worksheet('Dashboard')
-dash.write('A1', 'BASE SHIFT NAME:', header_fmt)
-dash.write('B1', 'DS') # Dropdown value yahan aayegi
-dash.write('A2', 'BASE DATE:', header_fmt)
-dash.write('B2', df['Date'].iloc[0]) # Pehli date default
-
-# Base Number Logic Formulas
-dash.write('A4', 'Base Number Found:', header_fmt)
-dash.write_formula('B4', '=TEXT(INDEX(Original_Data!$C$2:$I$6000, MATCH(B2, Original_Data!$B$2:$B$6000, 0), MATCH(B1, Original_Data!$C$1:$I$1, 0)), "00")')
-dash.write('A5', 'Dahai (Tens):', header_fmt)
-dash.write_formula('B5', '=LEFT(B4, 1)')
-dash.write('A6', 'Ikai (Units):', header_fmt)
-dash.write_formula('B6', '=RIGHT(B4, 1)')
-
-# --- LOGIC SHEETS FUNCTION ---
-def add_logic_sheet(sheet_name, base_cell_ref):
-    ws = workbook.add_worksheet(sheet_name)
-    ws.write(0, 0, 'Date', header_fmt)
+if uploaded_file:
+    # Data read karna
+    df = pd.read_excel(uploaded_file)
+    df.columns = [str(c).strip() for c in df.columns]
     
-    shifts = ['DS', 'FD', 'GD', 'GL', 'DB', 'SG', 'ZA']
+    # Date column dhundhna
+    date_col = next((c for c in df.columns if 'date' in c.lower()), df.columns[1])
     
-    for i, shift in enumerate(shifts):
-        ws.write(0, 1 + (i*2), f'{shift}_C1', header_fmt)
-        ws.write(0, 2 + (i*2), f'{shift}_C2', header_fmt)
+    # Buffer taiyaar karna Excel ke liye
+    output = BytesIO()
+    
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        # Sheet 1: Original Data
+        df.to_excel(writer, sheet_name='Original_Data', index=False)
+        workbook = writer.book
         
-        # 6000 Rows tak formulas apply karna
-        for row in range(1, 6001):
-            # Date Link
-            ws.write_formula(row, 0, f'=IF(Original_Data!B{row+1}="","",Original_Data!B{row+1})')
-            
-            col_letter = chr(67 + i) # C, D, E... (Shifts Columns)
-            
-            if sheet_name == 'Dahai_Logic':
-                # Dahai Logic (Base Dahai + Other Digits)
-                ws.write_formula(row, 1 + (i*2), f'=IF(Original_Data!{col_letter}{row+1}="","",$Dashboard!$B$5 & LEFT(TEXT(Original_Data!{col_letter}{row+1},"00"),1))')
-                ws.write_formula(row, 2 + (i*2), f'=IF(Original_Data!{col_letter}{row+1}="","",$Dashboard!$B$5 & RIGHT(TEXT(Original_Data!{col_letter}{row+1},"00"),1))')
-            else:
-                # Ikai Logic (Base Ikai + Other Digits)
-                ws.write_formula(row, 1 + (i*2), f'=IF(Original_Data!{col_letter}{row+1}="","",$Dashboard!$B$6 & RIGHT(TEXT(Original_Data!{col_letter}{row+1},"00"),1))')
-                ws.write_formula(row, 2 + (i*2), f'=IF(Original_Data!{col_letter}{row+1}="","",$Dashboard!$B$6 & LEFT(TEXT(Original_Data!{col_letter}{row+1},"00"),1))')
+        # Format styles
+        header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FFEB9C', 'border': 1})
+        date_fmt = workbook.add_format({'num_format': 'dd-mm-yyyy'})
 
-# Dono sheets create karein
-add_logic_sheet('Dahai_Logic', '$B$5')
-add_logic_sheet('Ikai_Logic', '$B$6')
+        # Sheet 2: Dashboard
+        dash = workbook.add_worksheet('Dashboard')
+        dash.write('A1', 'BASE SHIFT NAME:', header_fmt)
+        dash.write('B1', 'DS')  # Default Value
+        dash.write('A2', 'BASE DATE:', header_fmt)
+        
+        # Pehli date ko default likhna
+        first_date = df[date_col].iloc[0]
+        dash.write('B2', first_date, date_fmt)
 
-writer.close()
-print(f"Success! '{output_file}' taiyaar hai.")
+        # Calculation Formulas
+        dash.write('A4', 'Base Number Found:', header_fmt)
+        # INDEX/MATCH Formula
+        dash.write_formula('B4', '=TEXT(INDEX(Original_Data!$C$2:$I$6000, MATCH(B2, Original_Data!$B$2:$B$6000, 0), MATCH(B1, Original_Data!$C$1:$I$1, 0)), "00")')
+        
+        dash.write('A5', 'Dahai (Tens):', header_fmt)
+        dash.write_formula('B5', '=LEFT(B4, 1)')
+        dash.write('A6', 'Ikai (Units):', header_fmt)
+        dash.write_formula('B6', '=RIGHT(B4, 1)')
+
+        # Sheet 3 & 4: Logic Sheets
+        shifts = ['DS', 'FD', 'GD', 'GL', 'DB', 'SG', 'ZA']
+        
+        for sheet_name in ['Dahai_Logic', 'Ikai_Logic']:
+            ws = workbook.add_worksheet(sheet_name)
+            ws.write(0, 0, 'Date', header_fmt)
+            
+            for i, shift in enumerate(shifts):
+                ws.write(0, 1 + (i*2), f'{shift}_C1', header_fmt)
+                ws.write(0, 2 + (i*2), f'{shift}_C2', header_fmt)
+                
+                # 6000 rows tak formula khinchna
+                for row in range(1, 6001):
+                    ws.write_formula(row, 0, f'=IF(Original_Data!B{row+1}="","",Original_Data!B{row+1})')
+                    col_letter = chr(67 + i) # C, D, E...
+                    
+                    base_cell = '$B$5' if sheet_name == 'Dahai_Logic' else '$B$6'
+                    
+                    # Logic: Dahai/Ikai Base + Current Row Digit
+                    ws.write_formula(row, 1 + (i*2), f'=IF(Original_Data!{col_letter}{row+1}="","",$Dashboard!{base_cell} & LEFT(TEXT(Original_Data!{col_letter}{row+1},"00"),1))')
+                    ws.write_formula(row, 2 + (i*2), f'=IF(Original_Data!{col_letter}{row+1}="","",$Dashboard!{base_cell} & RIGHT(TEXT(Original_Data!{col_letter}{row+1},"00"),1))')
+
+    processed_data = output.getvalue()
+    st.success("✅ Formula file taiyaar hai!")
+    st.download_button(
+        label="📥 Download MAYA_Formula_Pro.xlsx",
+        data=processed_data,
+        file_name="MAYA_Formula_Pro.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+else:
+    st.info("Kripya apni 0DSP0.xlsx file upload karein taaki main usmein formulas fit kar sakoon.")
+    
